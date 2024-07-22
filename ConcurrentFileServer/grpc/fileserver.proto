@@ -1,0 +1,14 @@
+syntax = "proto3";
+option go_package = "example.com/fileserver";
+
+service FileServer {
+  rpc FileExists(FileExistsRequest) returns (FileExistsResponse);
+}
+
+message FileExistsRequest {
+  string fileId = 1;
+}
+
+message FileExistsResponse {
+  bool exists = 1;
+}

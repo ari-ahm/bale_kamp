@@ -1,0 +1,29 @@
+{
+  "chat_id" : "456",
+  "reply_markup" : {
+    "inline_keyboard" : [
+      [
+        {
+        "text" : "quera",
+        "url" : "https://quera.ir"
+        },
+        {
+          "text" : "bale",
+          "url" : "https://web.bale.ai"
+        },
+        {
+          "text" : "help",
+          "callback_data" : "/help"
+        }
+      ],
+      [
+        {
+          "text" : "start",
+          "callback_data" : "/start"
+        }
+      ]
+    ]
+  },
+  "text" : "<b>quera</b> vs <b>bale</b>",
+  "parse_mode" : "HTML"
+}

@@ -1,0 +1,91 @@
+syntax = "proto3";
+option go_package = "example.com/messenger";
+
+service MessengerService {
+  rpc AddUser(AddUserRequest) returns (AddUserResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc FetchMessage(FetchMessageRequest) returns (MessageResponse);
+  rpc GetUserMessages(GetUserMessagesRequest) returns (GetUserMessagesResponse);
+}
+
+message AddUserRequest {
+  string username = 1;
+  string profile_pic = 2;
+}
+
+message AddUserResponse {
+  int64 user_id = 1;
+}
+
+message SendMessageRequest {
+  GetUserRequest sending_user = 1;
+  GetUserRequest receiving_user = 2;
+  Message message = 3;
+}
+
+message GetUserRequest {
+  oneof user {
+    string username = 1;
+    int64 user_id = 2;
+  }
+}
+
+message Message {
+  oneof message {
+    TextMessage text_message = 3;
+    ImageMessage image_message = 4;
+    FileMessage file_message = 5;
+  }
+}
+
+message TextMessage {
+  string text = 1;
+}
+
+message ImageMessage {
+  string text = 1;
+  string file_id = 2;
+}
+
+message FileMessage {
+  string text = 1;
+  string file_id = 2;
+}
+
+message SendMessageResponse {
+  int64 message_id = 1;
+}
+
+message FetchMessageRequest {
+  int64 message_id = 1;
+}
+
+message MessageResponse {
+  int64 message_id = 1;
+  Message message = 2;
+}
+
+message GetUserMessagesRequest {
+  GetUserRequest user = 1;
+}
+
+message GetUserMessagesResponse {
+  map<int64, MultipleMessageResponse> messages = 1;
+}
+
+message MultipleMessageResponse {
+  repeated MessageResponse messages = 1;
+}
+
+
+service FileServer {
+  rpc FileExists(FileExistsRequest) returns (FileExistsResponse);
+}
+
+message FileExistsRequest {
+  string fileId = 1;
+}
+
+message FileExistsResponse {
+  bool exists = 1;
+}
