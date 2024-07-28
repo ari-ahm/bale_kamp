@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -74,8 +75,8 @@ func NewTextMessage(message string, sender, receiver int64, userRepo repository.
 	return &textMessage{base}, nil
 }
 
-func NewFileMessage(message, fileId string, sender, receiver int64, userRepo repository.UserRepository) (model.FileMessage, error) {
-	ok, err := utils.FileExists(fileId)
+func NewFileMessage(ctx context.Context, message, fileId string, sender, receiver int64, userRepo repository.UserRepository) (model.FileMessage, error) {
+	ok, err := utils.FileExists(ctx, fileId)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +92,8 @@ func NewFileMessage(message, fileId string, sender, receiver int64, userRepo rep
 	return &fileMessage{abstractMessage: base, fileId: fileId}, nil
 }
 
-func NewMediaMessage(message, fileId string, sender, receiver int64, userRepo repository.UserRepository) (model.MediaMessage, error) {
-	ok, err := utils.FileExists(fileId)
+func NewMediaMessage(ctx context.Context, message, fileId string, sender, receiver int64, userRepo repository.UserRepository) (model.MediaMessage, error) {
+	ok, err := utils.FileExists(ctx, fileId)
 	if err != nil {
 		return nil, err
 	}

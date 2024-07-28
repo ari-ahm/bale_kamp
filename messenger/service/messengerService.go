@@ -28,7 +28,7 @@ func (m *messengerService) AddUser(ctx context.Context, req *messenger.AddUserRe
 		return nil, status.Errorf(codes.AlreadyExists, "user already exists")
 	}
 
-	ok, err := utils.FileExists(req.GetProfilePic())
+	ok, err := utils.FileExists(ctx, req.GetProfilePic())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
@@ -55,7 +55,7 @@ func (m *messengerService) SendMessage(ctx context.Context, request *messenger.S
 		return nil, err
 	}
 
-	message, err := getMessage(request.GetMessage(), sendingUserId, receivingUserId, userRepo)
+	message, err := getMessage(ctx, request.GetMessage(), sendingUserId, receivingUserId, userRepo)
 	if err != nil {
 		return nil, err
 	}
@@ -124,14 +124,14 @@ func getUserId(request *messenger.GetUserRequest) (int64, error) {
 	}
 }
 
-func getMessage(request *messenger.Message, sender, receiver int64, userRepo repository.UserRepository) (model.Message, error) {
+func getMessage(ctx context.Context, request *messenger.Message, sender, receiver int64, userRepo repository.UserRepository) (model.Message, error) {
 	switch t := request.GetMessage().(type) {
 	case *messenger.Message_TextMessage:
 		return NewTextMessage(t.TextMessage.GetText(), sender, receiver, userRepo)
 	case *messenger.Message_FileMessage:
-		return NewFileMessage(t.FileMessage.GetText(), t.FileMessage.GetFileId(), sender, receiver, userRepo)
+		return NewFileMessage(ctx, t.FileMessage.GetText(), t.FileMessage.GetFileId(), sender, receiver, userRepo)
 	case *messenger.Message_ImageMessage:
-		return NewMediaMessage(t.ImageMessage.GetText(), t.ImageMessage.GetFileId(), sender, receiver, userRepo)
+		return NewMediaMessage(ctx, t.ImageMessage.GetText(), t.ImageMessage.GetFileId(), sender, receiver, userRepo)
 	default:
 		return nil, status.Error(codes.InvalidArgument, "invalid type in GetMessage")
 	}

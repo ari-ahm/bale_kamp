@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enginex
+  labels:
+    app: enginex
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: enginex
+  template:
+    metadata:
+      name: enginex
+      labels:
+        app: enginex
+    spec:
+      containers:
+        - name: enginex
+          image: nginx345678
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              protocol: TCP
+      restartPolicy: Always
+      
