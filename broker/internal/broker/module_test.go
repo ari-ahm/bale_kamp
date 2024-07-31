@@ -30,6 +30,8 @@ func TestPublishShouldFailOnClosed(t *testing.T) {
 
 	_, err = service.Publish(mainCtx, "ali", msg)
 	assert.Equal(t, broker.ErrUnavailable, err)
+
+	service = NewModule()
 }
 
 func TestSubscribeShouldFailOnClosed(t *testing.T) {
@@ -38,6 +40,8 @@ func TestSubscribeShouldFailOnClosed(t *testing.T) {
 
 	_, err = service.Subscribe(mainCtx, "ali")
 	assert.Equal(t, broker.ErrUnavailable, err)
+
+	service = NewModule()
 }
 
 func TestFetchShouldFailOnClosed(t *testing.T) {
@@ -46,6 +50,8 @@ func TestFetchShouldFailOnClosed(t *testing.T) {
 
 	_, err = service.Fetch(mainCtx, "ali", rand.Intn(100))
 	assert.Equal(t, broker.ErrUnavailable, err)
+
+	service = NewModule()
 }
 
 func TestPublishShouldNotFail(t *testing.T) {
@@ -64,6 +70,7 @@ func TestSubscribeShouldNotFail(t *testing.T) {
 }
 
 func TestPublishShouldSendMessageToSubscribedChan(t *testing.T) {
+	service = NewModule()
 	msg := createMessage()
 
 	sub, _ := service.Subscribe(mainCtx, "ali")
@@ -121,6 +128,7 @@ func TestPublishShouldNotSendToOtherSubscriptions(t *testing.T) {
 func TestNonExpiredMessageShouldBeFetchable(t *testing.T) {
 	msg := createMessageWithExpire(time.Second * 10)
 	id, _ := service.Publish(mainCtx, "ali", msg)
+	msg.Id = id
 	fMsg, _ := service.Fetch(mainCtx, "ali", id)
 
 	assert.Equal(t, msg, fMsg)
@@ -197,6 +205,7 @@ func TestConcurrentSubscribesShouldNotFail(t *testing.T) {
 }
 
 func TestConcurrentPublishOnOneSubjectShouldNotFail(t *testing.T) {
+	service = NewModule()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	var wg sync.WaitGroup
@@ -214,7 +223,8 @@ func TestConcurrentPublishOnOneSubjectShouldNotFail(t *testing.T) {
 			go func() {
 				defer wg.Done()
 
-				_, err := service.Publish(mainCtx, "ali", msg)
+				ctx, _ := context.WithDeadline(mainCtx, time.Now().Add(1*time.Second))
+				_, err := service.Publish(ctx, "ali", msg)
 				assert.Nil(t, err)
 			}()
 		}
@@ -247,6 +257,7 @@ func TestConcurrentPublishShouldNotFail(t *testing.T) {
 }
 
 func TestDataRace(t *testing.T) {
+	service := NewModule()
 	duration := 500 * time.Millisecond
 	ticker := time.NewTicker(duration)
 	defer ticker.Stop()
@@ -323,6 +334,49 @@ func BenchmarkSubscribe(b *testing.B) {
 		assert.Nil(b, err)
 	}
 }
+
+func BenchmarkPublish2(b *testing.B) {
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := service.Publish(mainCtx, randomString(2), createMessage())
+		assert.Nil(b, err)
+	}
+}
+
+func BenchmarkSubscribe2(b *testing.B) {
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := service.Subscribe(mainCtx, randomString(2))
+		assert.Nil(b, err)
+	}
+}
+
+//func TestAsli(t *testing.T) {
+//	service = NewModule()
+//	cnt := 10000
+//	tm := time.Now()
+//	for i := 0; i < cnt; i++ {
+//		ch, err := service.Subscribe(mainCtx, "ali")
+//		assert.Nil(t, err)
+//		go func() {
+//			for range ch {
+//
+//			}
+//		}()
+//	}
+//	dur := time.Since(tm)
+//	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
+//
+//	tm = time.Now()
+//	for i := 0; i < cnt; i++ {
+//		_, err := service.Publish(mainCtx, "ali", broker.Message{Body: "mammad"})
+//		assert.Nil(t, err)
+//	}
+//	dur = time.Since(tm)
+//	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
+//}
 
 func randomString(n int) string {
 	b := make([]rune, n)

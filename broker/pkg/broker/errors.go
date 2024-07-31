@@ -11,4 +11,12 @@ var (
 	// Use this error when message had been published, but it is not
 	// available anymore because the expiration time has reached.
 	ErrExpiredID = errors.New("message with id provided is expired")
+	// nil pointer.
+	ErrNilPointer = errors.New("pointer is nil")
+	// context canceled
+	ErrContextCanceled = errors.New("context canceled")
+	// internal error
+	ErrInternalError = errors.New("internal error")
+	// exhausted
+	ErrExhausted = errors.New("exhausted")
 )

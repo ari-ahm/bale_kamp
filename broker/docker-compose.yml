@@ -1,0 +1,19 @@
+services:
+  broker:
+    image: message_broker:v1
+    build:
+      context: .
+      target: release
+      dockerfile: Dockerfile
+    ports:
+      - 50051:50051
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - type: bind
+        source: ./prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+  grafana:
+    image: grafana/grafana-enterprise
+    ports:
+      - 3000:3000
