@@ -19,7 +19,7 @@ func NewBrokerServer() proto.BrokerServer {
 }
 
 func (b *brokerServerImpl) Publish(ctx context.Context, request *proto.PublishRequest) (*proto.PublishResponse, error) {
-	pubCtx, pubCtxCancel := context.WithTimeout(ctx, 1*time.Second) // TODO: fix and use env variable for timeout, see when to use cancel
+	pubCtx, pubCtxCancel := context.WithTimeout(ctx, 10*time.Second) // TODO: fix and use env variable for timeout, see when to use cancel
 	id, err := b.module.Publish(pubCtx, request.GetSubject(), newMessage(request))
 	pubCtxCancel()
 	if err != nil {

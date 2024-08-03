@@ -6,6 +6,7 @@ import (
 	"google.golang.org/grpc"
 	"io"
 	"log"
+	"sync"
 	"therealbroker/api/proto"
 	"therealbroker/pkg/broker"
 	"time"
@@ -92,13 +93,24 @@ func main() {
 
 	ctx, _ := context.WithTimeout(context.Background(), time.Duration(*deadline)*time.Second)
 	actSubCnt := 0
+	subFinishCnt := 0
+	subFinishCntLock := sync.Mutex{}
 	tm := time.Now()
 	for i := 0; i < subCnt; i++ {
 		ch, _ := bud.Subscribe(ctx, "ali")
 		go func() {
-			for range ch {
-
+			cnt := 0
+			for i := range ch {
+				if i.Body == "slm" {
+					cnt++
+				}
+				if cnt == pubCnt {
+					break
+				}
 			}
+			subFinishCntLock.Lock()
+			subFinishCnt++
+			subFinishCntLock.Unlock()
 		}()
 		actSubCnt++
 		select {
@@ -112,9 +124,14 @@ func main() {
 	log.Println(int(diff.Nanoseconds())/(actSubCnt+1), "ns/op")
 
 	actPubCnt := 0
+	wg := sync.WaitGroup{}
 	tm = time.Now()
 	for i := 0; i < pubCnt; i++ {
-		bud.Publish(ctx, "ali", broker.Message{Body: "dfghj", Expiration: 1 * time.Second})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bud.Publish(ctx, "ali", broker.Message{Body: "slm", Expiration: 1 * time.Second})
+		}()
 		actPubCnt++
 		select {
 		case <-ctx.Done():
@@ -122,7 +139,10 @@ func main() {
 		default:
 		}
 	}
+	wg.Wait()
 	diff = time.Since(tm)
 	log.Println("made", actPubCnt, "publishes in", diff.Milliseconds(), "ms")
 	log.Println(int(diff.Nanoseconds())/(actPubCnt+1), "ns/op")
+	time.Sleep(5 * time.Second)
+	log.Println(subFinishCnt, "subscribers got all the messages")
 }

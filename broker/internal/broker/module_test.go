@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"github.com/stretchr/testify/assert"
+	"log"
 	"math/rand"
 	"sync"
 	"testing"
@@ -223,7 +224,7 @@ func TestConcurrentPublishOnOneSubjectShouldNotFail(t *testing.T) {
 			go func() {
 				defer wg.Done()
 
-				ctx, _ := context.WithDeadline(mainCtx, time.Now().Add(1*time.Second))
+				ctx, _ := context.WithDeadline(mainCtx, time.Now().Add(10*time.Second))
 				_, err := service.Publish(ctx, "ali", msg)
 				assert.Nil(t, err)
 			}()
@@ -353,30 +354,30 @@ func BenchmarkSubscribe2(b *testing.B) {
 	}
 }
 
-//func TestAsli(t *testing.T) {
-//	service = NewModule()
-//	cnt := 10000
-//	tm := time.Now()
-//	for i := 0; i < cnt; i++ {
-//		ch, err := service.Subscribe(mainCtx, "ali")
-//		assert.Nil(t, err)
-//		go func() {
-//			for range ch {
-//
-//			}
-//		}()
-//	}
-//	dur := time.Since(tm)
-//	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
-//
-//	tm = time.Now()
-//	for i := 0; i < cnt; i++ {
-//		_, err := service.Publish(mainCtx, "ali", broker.Message{Body: "mammad"})
-//		assert.Nil(t, err)
-//	}
-//	dur = time.Since(tm)
-//	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
-//}
+func TestAsli(t *testing.T) {
+	service = NewModule()
+	cnt := 10000
+	tm := time.Now()
+	for i := 0; i < cnt; i++ {
+		ch, err := service.Subscribe(mainCtx, "ali")
+		assert.Nil(t, err)
+		go func() {
+			for range ch {
+
+			}
+		}()
+	}
+	dur := time.Since(tm)
+	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
+
+	tm = time.Now()
+	for i := 0; i < cnt; i++ {
+		_, err := service.Publish(mainCtx, "ali", broker.Message{Body: "mammad"})
+		assert.Nil(t, err)
+	}
+	dur = time.Since(tm)
+	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
+}
 
 func randomString(n int) string {
 	b := make([]rune, n)

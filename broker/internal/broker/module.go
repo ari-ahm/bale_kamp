@@ -45,27 +45,61 @@ func newSubscriber(ctx context.Context, msg chan<- broker.Message) *subscriber {
 }
 
 func newSubjectStruct() *subjectStruct {
-	ch := make(chan *broker.Message, 1000) // TODO read 1000 from env
+	eventChannel := make(chan *broker.Message, 1000) // TODO read 1000 from env
 	subj := subjectStruct{
-		messageEvents: ch,
+		messageEvents: eventChannel,
 	}
 
+	//go func() {
+	//	for msg := range eventChannel {
+	//		subj.subscribers.Range(func(k, v interface{}) bool {
+	//			key := k.(int)
+	//			value := v.(*subscriber)
+	//
+	//			select {
+	//			case <-value.ctx.Done():
+	//				subj.subscribers.Delete(key)
+	//				close(value.msg)
+	//			case value.msg <- *msg:
+	//			default:
+	//			}
+	//
+	//			return true
+	//		})
+	//	}
+	//}()
+	////////////////////////////////////////////////////////
+	subParts := 8 // TODO read from env
+	maxLen := 12000
 	go func() {
-		for msg := range ch {
-			subj.subscribers.Range(func(k, v interface{}) bool {
-				key := k.(int)
-				value := v.(*subscriber)
+		subChannels := make([]chan *broker.Message, subParts)
+		for i := 0; i < subParts; i++ {
+			subChannels[i] = make(chan *broker.Message)
+			go func(l, r int, inp <-chan *broker.Message) {
+				for msg := range inp {
+					for i := l; i < r; i++ {
+						tmp, ok := subj.subscribers.Load(i)
+						if !ok {
+							continue
+						}
 
-				select {
-				case <-value.ctx.Done():
-					subj.subscribers.Delete(key)
-					close(value.msg)
-				case value.msg <- *msg:
-				default:
+						sub := tmp.(*subscriber)
+
+						select {
+						case <-sub.ctx.Done():
+							subj.subscribers.Delete(i)
+							close(sub.msg)
+						case sub.msg <- *msg:
+						default:
+						}
+					}
 				}
-
-				return true
-			})
+			}(i*maxLen/subParts, (i+1)*maxLen/subParts, subChannels[i])
+		}
+		for msg := range eventChannel {
+			for _, sub := range subChannels {
+				sub <- msg
+			}
 		}
 	}()
 

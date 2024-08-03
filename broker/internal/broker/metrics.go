@@ -34,7 +34,7 @@ func MetricsUnaryInterceptor(
 ) (interface{}, error) {
 	start := time.Now()
 	ret, err := handler(ctx, req)
-	duration := time.Since(start).Milliseconds()
+	duration := time.Since(start).Microseconds()
 
 	status := "successful"
 	errorLabel := ""
@@ -64,7 +64,7 @@ func MetricsStreamInterceptor(
 
 	start := time.Now()
 	err := handler(srv, ss)
-	duration := time.Since(start).Milliseconds()
+	duration := time.Since(start).Microseconds()
 
 	switch info.FullMethod {
 	case "/broker.Broker/Subscribe":
