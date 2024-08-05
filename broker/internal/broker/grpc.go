@@ -33,19 +33,26 @@ func (b *brokerServerImpl) Subscribe(request *proto.SubscribeRequest, server pro
 	ctx := server.Context()
 	subCtx, subCtxCancel := context.WithCancel(ctx)
 	defer subCtxCancel()
-	msg, err := b.module.Subscribe(subCtx, request.GetSubject())
+	msgChannel, err := b.module.Subscribe(subCtx, request.GetSubject())
 	if err != nil {
 		return errTranslate(err)
 	}
 
-	for i := range msg {
-		err := server.Send(newMessageResponse(&i))
-		if err != nil {
-			return err
+	for {
+		select {
+		case msg, ok := <-msgChannel:
+			if !ok {
+				return nil
+			}
+
+			err := server.Send(newMessageResponse(&msg))
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return errTranslate(broker.ErrContextCanceled)
 		}
 	}
-
-	return nil
 }
 
 func (b *brokerServerImpl) Fetch(ctx context.Context, request *proto.FetchRequest) (*proto.MessageResponse, error) {

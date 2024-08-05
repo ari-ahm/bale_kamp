@@ -356,27 +356,54 @@ func BenchmarkSubscribe2(b *testing.B) {
 
 func TestAsli(t *testing.T) {
 	service = NewModule()
-	cnt := 10000
+	cnt1 := 1
+	cnt2 := 2000
+
+	finalTrue := 0
+	finalTrueLock := sync.Mutex{}
+
+	mmdwg := sync.WaitGroup{}
 	tm := time.Now()
-	for i := 0; i < cnt; i++ {
+	for i := 0; i < cnt1; i++ {
 		ch, err := service.Subscribe(mainCtx, "ali")
 		assert.Nil(t, err)
+		mmdwg.Add(1)
 		go func() {
-			for range ch {
-
+			defer mmdwg.Done()
+			tmp := 0
+			for i := range ch {
+				if i.Body == "mammad" {
+					tmp++
+				}
+				if tmp == cnt2 {
+					finalTrueLock.Lock()
+					finalTrue++
+					finalTrueLock.Unlock()
+					return
+				}
 			}
 		}()
 	}
 	dur := time.Since(tm)
-	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
+	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt1))
 
+	time.Sleep(2 * time.Second)
+
+	wg := sync.WaitGroup{}
 	tm = time.Now()
-	for i := 0; i < cnt; i++ {
-		_, err := service.Publish(mainCtx, "ali", broker.Message{Body: "mammad"})
-		assert.Nil(t, err)
+	for i := 0; i < cnt2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := service.Publish(mainCtx, "ali", broker.Message{Body: "mammad"})
+			assert.Nil(t, err)
+		}()
 	}
+	wg.Wait()
 	dur = time.Since(tm)
-	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt))
+	log.Println(dur.Milliseconds(), int64(dur.Nanoseconds())/int64(cnt2))
+	mmdwg.Wait()
+	log.Println(finalTrue)
 }
 
 func randomString(n int) string {

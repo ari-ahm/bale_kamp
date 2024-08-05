@@ -95,10 +95,13 @@ func main() {
 	actSubCnt := 0
 	subFinishCnt := 0
 	subFinishCntLock := sync.Mutex{}
+	wg := sync.WaitGroup{}
 	tm := time.Now()
 	for i := 0; i < subCnt; i++ {
-		ch, _ := bud.Subscribe(ctx, "ali")
+		wg.Add(1)
 		go func() {
+			ch, _ := bud.Subscribe(ctx, "ali")
+			wg.Done()
 			cnt := 0
 			for i := range ch {
 				if i.Body == "slm" {
@@ -124,14 +127,13 @@ func main() {
 	log.Println(int(diff.Nanoseconds())/(actSubCnt+1), "ns/op")
 
 	actPubCnt := 0
-	wg := sync.WaitGroup{}
 	tm = time.Now()
 	for i := 0; i < pubCnt; i++ {
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			bud.Publish(ctx, "ali", broker.Message{Body: "slm", Expiration: 1 * time.Second})
-		}()
+		//go func() {
+		wg.Done()
+		bud.Publish(ctx, "ali", broker.Message{Body: "slm", Expiration: 1 * time.Second})
+		//}()
 		actPubCnt++
 		select {
 		case <-ctx.Done():

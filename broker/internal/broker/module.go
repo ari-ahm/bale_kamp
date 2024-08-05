@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/madflojo/tasks"
 	"log"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"therealbroker/pkg/broker"
@@ -18,14 +19,14 @@ type Module struct {
 
 type subscriber struct {
 	ctx context.Context
-	msg chan<- broker.Message
+	msg chan broker.Message
 }
 
 type subjectStruct struct {
 	msgIdCnt      atomic.Int64
 	subIdCnt      int
 	messages      sync.Map
-	subscribers   sync.Map
+	subscribers   []sync.Map
 	pubLock       sync.Mutex
 	subLock       sync.Mutex
 	messageEvents chan<- *broker.Message
@@ -37,7 +38,8 @@ func NewModule() broker.Broker {
 	}
 }
 
-func newSubscriber(ctx context.Context, msg chan<- broker.Message) *subscriber {
+func newSubscriber(ctx context.Context) *subscriber {
+	msg := make(chan broker.Message, 1000) // TODO read from env
 	return &subscriber{
 		msg: msg,
 		ctx: ctx,
@@ -46,56 +48,36 @@ func newSubscriber(ctx context.Context, msg chan<- broker.Message) *subscriber {
 
 func newSubjectStruct() *subjectStruct {
 	eventChannel := make(chan *broker.Message, 1000) // TODO read 1000 from env
+	subRoutinesCnt := 8                              // TODO read from env
 	subj := subjectStruct{
 		messageEvents: eventChannel,
+		subscribers:   make([]sync.Map, subRoutinesCnt),
 	}
 
-	//go func() {
-	//	for msg := range eventChannel {
-	//		subj.subscribers.Range(func(k, v interface{}) bool {
-	//			key := k.(int)
-	//			value := v.(*subscriber)
-	//
-	//			select {
-	//			case <-value.ctx.Done():
-	//				subj.subscribers.Delete(key)
-	//				close(value.msg)
-	//			case value.msg <- *msg:
-	//			default:
-	//			}
-	//
-	//			return true
-	//		})
-	//	}
-	//}()
-	////////////////////////////////////////////////////////
-	subParts := 8 // TODO read from env
-	maxLen := 12000
-	go func() {
-		subChannels := make([]chan *broker.Message, subParts)
-		for i := 0; i < subParts; i++ {
+	go func() { // TODO add mainCtx
+		subChannels := make([]chan *broker.Message, subRoutinesCnt)
+		for i := 0; i < subRoutinesCnt; i++ {
 			subChannels[i] = make(chan *broker.Message)
-			go func(l, r int, inp <-chan *broker.Message) {
-				for msg := range inp {
-					for i := l; i < r; i++ {
-						tmp, ok := subj.subscribers.Load(i)
-						if !ok {
-							continue
-						}
-
-						sub := tmp.(*subscriber)
+			go func(i int, ch <-chan *broker.Message) {
+				for msg := range ch {
+					subj.subscribers[i].Range(func(k, v interface{}) bool {
+						id := k.(int)
+						sub := v.(*subscriber)
 
 						select {
 						case <-sub.ctx.Done():
-							subj.subscribers.Delete(i)
+							subj.subscribers[i].Delete(id)
 							close(sub.msg)
 						case sub.msg <- *msg:
 						default:
 						}
-					}
+
+						return true
+					})
 				}
-			}(i*maxLen/subParts, (i+1)*maxLen/subParts, subChannels[i])
+			}(i, subChannels[i])
 		}
+
 		for msg := range eventChannel {
 			for _, sub := range subChannels {
 				sub <- msg
@@ -118,7 +100,7 @@ func preChecks(m *Module) error {
 	return nil
 }
 
-func (m *Module) Close() error {
+func (m *Module) Close() error { // TODO clean
 	if err := preChecks(m); err != nil {
 		return err
 	}
@@ -133,10 +115,12 @@ func (m *Module) Close() error {
 
 	m.subjects.Range(func(k, v interface{}) bool {
 		close(v.(*subjectStruct).messageEvents)
-		v.(*subjectStruct).subscribers.Range(func(k, v interface{}) bool {
-			close(v.(chan<- broker.Message))
-			return true
-		})
+		for i, _ := range v.(*subjectStruct).subscribers {
+			v.(*subjectStruct).subscribers[i].Range(func(k, v interface{}) bool {
+				close(v.(chan<- broker.Message))
+				return true
+			})
+		}
 		return true
 	})
 
@@ -150,10 +134,15 @@ func (m *Module) Publish(ctx context.Context, subject string, msg broker.Message
 	if err := preChecks(m); err != nil {
 		return 0, err
 	}
-	tmp, _ := m.subjects.LoadOrStore(subject, newSubjectStruct())
+
+	tmp, ok := m.subjects.Load(subject)
+	if !ok {
+		tmp = newSubjectStruct()
+		m.subjects.Store(subject, tmp)
+	}
 	subj := tmp.(*subjectStruct)
 
-	subj.pubLock.Lock()
+	subj.pubLock.Lock() // TODO remove when adding db
 	defer subj.pubLock.Unlock()
 
 	if msg.Expiration != 0 {
@@ -191,17 +180,22 @@ func (m *Module) Subscribe(ctx context.Context, subject string) (<-chan broker.M
 	if err := preChecks(m); err != nil {
 		return nil, err
 	}
-	tmp, _ := m.subjects.LoadOrStore(subject, newSubjectStruct())
+
+	tmp, ok := m.subjects.Load(subject)
+	if !ok {
+		tmp = newSubjectStruct()
+		m.subjects.Store(subject, tmp)
+	}
 	subj := tmp.(*subjectStruct)
 
-	subj.subLock.Lock()
+	subj.subLock.Lock() // TODO remove when adding db
 	defer subj.subLock.Unlock()
 
 	subj.subIdCnt++
-	msg := make(chan broker.Message, 1000)
-	subj.subscribers.Store(subj.subIdCnt, newSubscriber(context.WithoutCancel(ctx), msg))
+	newSub := newSubscriber(context.WithoutCancel(ctx))
+	subj.subscribers[rand.Intn(len(subj.subscribers))].Store(subj.subIdCnt, newSub)
 
-	return msg, nil
+	return newSub.msg, nil
 }
 
 func (m *Module) Fetch(ctx context.Context, subject string, id int) (broker.Message, error) {

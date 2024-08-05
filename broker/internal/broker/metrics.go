@@ -18,6 +18,7 @@ var (
 	methodCalls = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "broker_method_calls",
 		Help: "Method call duration and status",
+		//Buckets: []float64{0.1, 0.2},
 	}, []string{"method", "status", "error"})
 )
 
@@ -34,7 +35,7 @@ func MetricsUnaryInterceptor(
 ) (interface{}, error) {
 	start := time.Now()
 	ret, err := handler(ctx, req)
-	duration := time.Since(start).Microseconds()
+	duration := time.Since(start).Milliseconds()
 
 	status := "successful"
 	errorLabel := ""
@@ -64,7 +65,7 @@ func MetricsStreamInterceptor(
 
 	start := time.Now()
 	err := handler(srv, ss)
-	duration := time.Since(start).Microseconds()
+	duration := time.Since(start).Milliseconds()
 
 	switch info.FullMethod {
 	case "/broker.Broker/Subscribe":
