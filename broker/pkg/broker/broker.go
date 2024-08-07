@@ -33,7 +33,7 @@ type Broker interface {
 	// subscribed clients ( channels ).
 	// If the context is cancelled, you have to stop sending messages
 	// to this subscriber. Do nothing on time-out
-	Subscribe(ctx context.Context, subject string) (<-chan Message, error)
+	Subscribe(ctx context.Context, subject string) (<-chan *Message, error)
 
 	// Fetch enables us to retrieve a message that is already published, if
 	// it's not expired yet.

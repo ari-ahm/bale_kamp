@@ -30,12 +30,12 @@ func (b brokerSpy) Publish(ctx context.Context, subject string, msg broker.Messa
 	return int(res.GetId()), err
 }
 
-func (b brokerSpy) Subscribe(ctx context.Context, subject string) (<-chan broker.Message, error) {
+func (b brokerSpy) Subscribe(ctx context.Context, subject string) (<-chan *broker.Message, error) {
 	res, err := b.client.Subscribe(context.WithoutCancel(ctx), &proto.SubscribeRequest{
 		Subject: subject,
 	})
 
-	ch := make(chan broker.Message)
+	ch := make(chan *broker.Message)
 
 	go func() {
 		defer close(ch)
@@ -49,7 +49,7 @@ func (b brokerSpy) Subscribe(ctx context.Context, subject string) (<-chan broker
 				return
 			}
 
-			ch <- broker.Message{
+			ch <- &broker.Message{
 				Body: string(in.GetBody()),
 			}
 		}

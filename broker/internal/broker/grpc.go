@@ -15,7 +15,7 @@ type brokerServerImpl struct {
 }
 
 func NewBrokerServer() proto.BrokerServer {
-	return &brokerServerImpl{module: NewModule()}
+	return &brokerServerImpl{module: NewModule(NewBrokerRepo(), NewBrokerMessageHandler())}
 }
 
 func (b *brokerServerImpl) Publish(ctx context.Context, request *proto.PublishRequest) (*proto.PublishResponse, error) {
@@ -45,7 +45,7 @@ func (b *brokerServerImpl) Subscribe(request *proto.SubscribeRequest, server pro
 				return nil
 			}
 
-			err := server.Send(newMessageResponse(&msg))
+			err := server.Send(newMessageResponse(msg))
 			if err != nil {
 				return err
 			}

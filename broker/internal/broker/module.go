@@ -2,93 +2,26 @@ package broker
 
 import (
 	"context"
-	"github.com/madflojo/tasks"
-	"log"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"therealbroker/pkg/broker"
 )
 
-type Module struct {
-	subjects  sync.Map
-	closing   atomic.Bool
-	scheduler *tasks.Scheduler
-	wg        sync.WaitGroup
+type module struct {
+	closing        atomic.Bool
+	wg             sync.WaitGroup
+	repo           BrokerRepo
+	messageHandler BrokerMessageHandler
 }
 
-type subscriber struct {
-	ctx context.Context
-	msg chan broker.Message
-}
-
-type subjectStruct struct {
-	msgIdCnt      atomic.Int64
-	subIdCnt      int
-	messages      sync.Map
-	subscribers   []sync.Map
-	pubLock       sync.Mutex
-	subLock       sync.Mutex
-	messageEvents chan<- *broker.Message
-}
-
-func NewModule() broker.Broker {
-	return &Module{
-		scheduler: tasks.New(),
+func NewModule(repo BrokerRepo, messageHandler BrokerMessageHandler) broker.Broker {
+	return &module{
+		repo:           repo,
+		messageHandler: messageHandler,
 	}
 }
 
-func newSubscriber(ctx context.Context) *subscriber {
-	msg := make(chan broker.Message, 1000) // TODO read from env
-	return &subscriber{
-		msg: msg,
-		ctx: ctx,
-	}
-}
-
-func newSubjectStruct() *subjectStruct {
-	eventChannel := make(chan *broker.Message, 1000) // TODO read 1000 from env
-	subRoutinesCnt := 8                              // TODO read from env
-	subj := subjectStruct{
-		messageEvents: eventChannel,
-		subscribers:   make([]sync.Map, subRoutinesCnt),
-	}
-
-	go func() { // TODO add mainCtx
-		subChannels := make([]chan *broker.Message, subRoutinesCnt)
-		for i := 0; i < subRoutinesCnt; i++ {
-			subChannels[i] = make(chan *broker.Message)
-			go func(i int, ch <-chan *broker.Message) {
-				for msg := range ch {
-					subj.subscribers[i].Range(func(k, v interface{}) bool {
-						id := k.(int)
-						sub := v.(*subscriber)
-
-						select {
-						case <-sub.ctx.Done():
-							subj.subscribers[i].Delete(id)
-							close(sub.msg)
-						case sub.msg <- *msg:
-						default:
-						}
-
-						return true
-					})
-				}
-			}(i, subChannels[i])
-		}
-
-		for msg := range eventChannel {
-			for _, sub := range subChannels {
-				sub <- msg
-			}
-		}
-	}()
-
-	return &subj
-}
-
-func preChecks(m *Module) error {
+func preChecks(m *module) error {
 	if m == nil {
 		return broker.ErrNilPointer
 	}
@@ -100,7 +33,7 @@ func preChecks(m *Module) error {
 	return nil
 }
 
-func (m *Module) Close() error { // TODO clean
+func (m *module) Close() error { // TODO clean
 	if err := preChecks(m); err != nil {
 		return err
 	}
@@ -111,23 +44,19 @@ func (m *Module) Close() error { // TODO clean
 	}
 
 	m.wg.Wait()
-	m.scheduler.Stop()
 
-	m.subjects.Range(func(k, v interface{}) bool {
-		close(v.(*subjectStruct).messageEvents)
-		for i, _ := range v.(*subjectStruct).subscribers {
-			v.(*subjectStruct).subscribers[i].Range(func(k, v interface{}) bool {
-				close(v.(chan<- broker.Message))
-				return true
-			})
-		}
-		return true
-	})
+	if err := m.messageHandler.Close(); err != nil {
+		return err
+	}
+
+	if err := m.repo.Close(); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (m *Module) Publish(ctx context.Context, subject string, msg broker.Message) (int, error) {
+func (m *module) Publish(ctx context.Context, subject string, msg broker.Message) (int, error) {
 	m.wg.Add(1)
 	defer m.wg.Done()
 
@@ -135,45 +64,19 @@ func (m *Module) Publish(ctx context.Context, subject string, msg broker.Message
 		return 0, err
 	}
 
-	tmp, ok := m.subjects.Load(subject)
-	if !ok {
-		tmp = newSubjectStruct()
-		m.subjects.Store(subject, tmp)
-	}
-	subj := tmp.(*subjectStruct)
-
-	subj.pubLock.Lock() // TODO remove when adding db
-	defer subj.pubLock.Unlock()
-
-	if msg.Expiration != 0 {
-		id := int(subj.msgIdCnt.Add(1))
-		msg.Id = id
-		subj.messages.Store(id, &msg)
-		_, err := m.scheduler.Add(&tasks.Task{
-			Interval: msg.Expiration,
-			RunOnce:  true,
-			TaskFunc: func() error {
-				subj.messages.Delete(id)
-				return nil
-			},
-		})
-
-		if err != nil {
-			log.Println("Failed to add task:", err)
-			return 0, broker.ErrInternalError
-		}
+	id, err := m.repo.save(ctx, &msg, subject)
+	if err != nil {
+		return 0, err
 	}
 
-	select {
-	case subj.messageEvents <- &msg:
-	case <-ctx.Done():
-		return 0, broker.ErrContextCanceled
+	if err := m.messageHandler.sendMessage(ctx, &msg, subject); err != nil {
+		return 0, err
 	}
 
-	return int(subj.msgIdCnt.Load()), nil
+	return id, nil
 }
 
-func (m *Module) Subscribe(ctx context.Context, subject string) (<-chan broker.Message, error) {
+func (m *module) Subscribe(ctx context.Context, subject string) (<-chan *broker.Message, error) {
 	m.wg.Add(1)
 	defer m.wg.Done()
 
@@ -181,24 +84,15 @@ func (m *Module) Subscribe(ctx context.Context, subject string) (<-chan broker.M
 		return nil, err
 	}
 
-	tmp, ok := m.subjects.Load(subject)
-	if !ok {
-		tmp = newSubjectStruct()
-		m.subjects.Store(subject, tmp)
+	msg, err := m.messageHandler.addSubscriber(ctx, subject, ctx)
+	if err != nil {
+		return nil, err
 	}
-	subj := tmp.(*subjectStruct)
 
-	subj.subLock.Lock() // TODO remove when adding db
-	defer subj.subLock.Unlock()
-
-	subj.subIdCnt++
-	newSub := newSubscriber(context.WithoutCancel(ctx))
-	subj.subscribers[rand.Intn(len(subj.subscribers))].Store(subj.subIdCnt, newSub)
-
-	return newSub.msg, nil
+	return msg, nil
 }
 
-func (m *Module) Fetch(ctx context.Context, subject string, id int) (broker.Message, error) {
+func (m *module) Fetch(ctx context.Context, subject string, id int) (broker.Message, error) {
 	m.wg.Add(1)
 	defer m.wg.Done()
 
@@ -206,21 +100,10 @@ func (m *Module) Fetch(ctx context.Context, subject string, id int) (broker.Mess
 		return broker.Message{}, err
 	}
 
-	tmp, ok := m.subjects.Load(subject)
-	if !ok {
-		return broker.Message{}, broker.ErrInvalidID
-	}
-	subj := tmp.(*subjectStruct)
-
-	if id < 1 || id > int(subj.msgIdCnt.Load()) {
-		return broker.Message{}, broker.ErrInvalidID
+	msg, err := m.repo.load(ctx, id, subject)
+	if err != nil {
+		return broker.Message{}, err
 	}
 
-	msg, ok := subj.messages.Load(id)
-
-	if !ok {
-		return broker.Message{}, broker.ErrExpiredID
-	}
-
-	return *msg.(*broker.Message), nil
+	return *msg, nil
 }
