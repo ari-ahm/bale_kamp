@@ -6,11 +6,14 @@ import (
 	"google.golang.org/grpc"
 	"io"
 	"log"
+	"math/rand"
 	"sync"
 	"therealbroker/api/proto"
 	"therealbroker/pkg/broker"
 	"time"
 )
+
+var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 type brokerSpy struct {
 	client proto.BrokerClient
@@ -91,6 +94,8 @@ func main() {
 	subCnt := *subCntFlag
 	pubCnt := *pubCntFlag
 
+	jafar := 0
+
 	ctx, _ := context.WithTimeout(context.Background(), time.Duration(*deadline)*time.Second)
 	actSubCnt := 0
 	subFinishCnt := 0
@@ -104,8 +109,9 @@ func main() {
 			wg.Done()
 			cnt := 0
 			for i := range ch {
-				if i.Body == "slm" {
+				if i.Body != "" {
 					cnt++
+					jafar++
 				}
 				if cnt == pubCnt {
 					break
@@ -130,10 +136,10 @@ func main() {
 	tm = time.Now()
 	for i := 0; i < pubCnt; i++ {
 		wg.Add(1)
-		//go func() {
-		wg.Done()
-		bud.Publish(ctx, "ali", broker.Message{Body: "slm", Expiration: 1 * time.Second})
-		//}()
+		go func() {
+			defer wg.Done()
+			bud.Publish(ctx, "ali", broker.Message{Body: randomString(20), Expiration: 1 * time.Second})
+		}()
 		actPubCnt++
 		select {
 		case <-ctx.Done():
@@ -145,6 +151,15 @@ func main() {
 	diff = time.Since(tm)
 	log.Println("made", actPubCnt, "publishes in", diff.Milliseconds(), "ms")
 	log.Println(int(diff.Nanoseconds())/(actPubCnt+1), "ns/op")
-	time.Sleep(5 * time.Second)
+	time.Sleep(30 * time.Second)
 	log.Println(subFinishCnt, "subscribers got all the messages")
+	log.Println(jafar)
+}
+
+func randomString(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
 }

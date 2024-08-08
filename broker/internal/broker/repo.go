@@ -2,18 +2,20 @@ package broker
 
 import (
 	"context"
-	"github.com/madflojo/tasks"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"log"
 	"sync"
 	"therealbroker/pkg/broker"
+	"time"
 )
 
 type brokerRepo struct {
-	scheduler *tasks.Scheduler
-	msgIdCnt  int
-	messages  map[string]map[int]*broker.Message
-	lock      sync.Mutex
+	dbConn    *pgxpool.Pool
+	batches   [2]*pgx.Batch
+	batchSwap sync.WaitGroup
+	lock      sync.Mutex // TODO change
 }
 
 type BrokerRepo interface {
@@ -23,67 +25,112 @@ type BrokerRepo interface {
 }
 
 func NewBrokerRepo() BrokerRepo {
-	return &brokerRepo{
-		scheduler: tasks.New(),
-		messages:  make(map[string]map[int]*broker.Message),
+	conn, err := pgxpool.New(context.Background(), "postgres://root:root@db:5432/broker?sslmode=disable") // TODO read from env.
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	mh := &brokerRepo{
+		dbConn:  conn,
+		batches: [2]*pgx.Batch{{}, {}},
+	}
+
+	batchLock := sync.Mutex{}
+	commit := func() error {
+		did := batchLock.TryLock()
+		if did {
+			defer batchLock.Unlock()
+
+			mh.lock.Lock()
+			mh.batches[0] = mh.batches[1]
+			mh.batches[1] = &pgx.Batch{}
+			mh.lock.Unlock()
+
+			br := conn.SendBatch(context.Background(), mh.batches[0]) // TODO fix context
+			err = br.Close()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	ticker := time.Tick(50 * time.Millisecond) // TODO env
+	go func() {
+		for range ticker {
+			err := commit()
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	}()
+
+	return mh
 }
 
 func (r *brokerRepo) save(ctx context.Context, message *broker.Message, subject string) (int, error) {
-	r.lock.Lock() // TODO change
-	defer r.lock.Unlock()
-
-	if _, ok := r.messages[subject]; !ok {
-		r.messages[subject] = make(map[int]*broker.Message)
+	var id int64
+	err := r.runQuery(ctx,
+		func(row pgx.Row, finish chan<- bool) error {
+			err := row.Scan(&id)
+			finish <- true
+			return err
+		},
+		"INSERT INTO messages (body, subject, expiration) VALUES ($1, $2, $3) RETURNING id", message.Body, subject, time.Now().UTC().Add(message.Expiration))
+	if err != nil {
+		return 0, err
 	}
-
-	id := 0
-	if message.Expiration != 0 {
-		r.msgIdCnt++
-		id = r.msgIdCnt
-		message.Id = id
-		r.messages[subject][id] = message
-		_, err := r.scheduler.Add(&tasks.Task{
-			Interval: message.Expiration,
-			RunOnce:  true,
-			TaskFunc: func() error {
-				r.lock.Lock()
-				defer r.lock.Unlock()
-
-				delete(r.messages[subject], id)
-				return nil
-			},
-		})
-
-		if err != nil {
-			log.Println("Failed to add task:", err)
-			return 0, broker.ErrInternalError
-		}
-	}
-
-	return id, nil
+	return int(id), nil
 }
 
 func (r *brokerRepo) load(ctx context.Context, id int, subject string) (*broker.Message, error) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-	if _, ok := r.messages[subject]; !ok {
-		r.messages[subject] = make(map[int]*broker.Message)
+	var message broker.Message
+	var actSubject string
+	var expiration time.Time
+	err := r.runQuery(ctx,
+		func(row pgx.Row, finish chan<- bool) error {
+			row.Scan(&message.Body, &actSubject, &expiration)
+			finish <- true
+			return nil
+		}, "SELECT body, subject, expiration FROM messages WHERE id = $1 LIMIT 1", id)
+
+	if err != nil {
+		return nil, err
 	}
 
-	if id < 1 || id > r.msgIdCnt {
+	if actSubject != subject {
 		return nil, broker.ErrInvalidID
 	}
 
-	msg, ok := r.messages[subject][id]
-	if !ok {
+	if expiration.Before(time.Now().UTC()) {
 		return nil, broker.ErrExpiredID
 	}
 
-	return msg, nil
+	message.Id = id
+
+	return &message, nil
 }
 
 func (r *brokerRepo) Close() error {
-	r.scheduler.Stop()
+	r.dbConn.Close()
+	return nil
+}
+
+func (r *brokerRepo) runQuery(ctx context.Context, fn func(pgx.Row, chan<- bool) error, query string, args ...any) error {
+	finish := make(chan bool, 1)
+
+	r.lock.Lock()
+	row := r.batches[1].Queue(query, args...)
+	row.QueryRow(func(row pgx.Row) error {
+		return fn(row, finish)
+	})
+	r.lock.Unlock()
+
+	select {
+	case <-finish:
+	case <-ctx.Done():
+		return broker.ErrContextCanceled
+	}
+
 	return nil
 }

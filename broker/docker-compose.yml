@@ -1,10 +1,25 @@
 services:
+  db:
+    image: postgres:13-alpine
+    healthcheck:
+      test: pg_isready -U root -d broker
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    environment:
+      POSTGRES_USER: root # TODO change
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: broker
+    volumes:
+      - ./initdb.sql:/docker-entrypoint-initdb.d/initdb.sql
   broker:
     image: message_broker:v1
     build:
       context: .
       target: release
       dockerfile: Dockerfile
+    depends_on:
+      - db
     ports:
       - 50051:50051
   prometheus:

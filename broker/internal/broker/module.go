@@ -2,9 +2,21 @@ package broker
 
 import (
 	"context"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"sync"
 	"sync/atomic"
 	"therealbroker/pkg/broker"
+	"time"
+)
+
+var (
+	chartMetric1 = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "broker_chart1",
+	})
+	chartMetric2 = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "broker_chart2",
+	})
 )
 
 type module struct {
@@ -64,14 +76,18 @@ func (m *module) Publish(ctx context.Context, subject string, msg broker.Message
 		return 0, err
 	}
 
+	tm := time.Now()
 	id, err := m.repo.save(ctx, &msg, subject)
 	if err != nil {
 		return 0, err
 	}
+	chartMetric1.Observe(float64(time.Since(tm).Milliseconds()))
 
+	tm = time.Now()
 	if err := m.messageHandler.sendMessage(ctx, &msg, subject); err != nil {
 		return 0, err
 	}
+	chartMetric2.Observe(float64(time.Since(tm).Milliseconds()))
 
 	return id, nil
 }

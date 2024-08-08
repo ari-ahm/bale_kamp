@@ -5,7 +5,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/status"
 	"time"
 )
 
@@ -16,9 +15,9 @@ var (
 	})
 
 	methodCalls = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "broker_method_calls",
-		Help: "Method call duration and status",
-		//Buckets: []float64{0.1, 0.2},
+		Name:    "broker_method_calls",
+		Help:    "Method call duration and status",
+		Buckets: []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096},
 	}, []string{"method", "status", "error"})
 )
 
@@ -63,27 +62,12 @@ func MetricsStreamInterceptor(
 		activeSubscribers.Inc()
 	}
 
-	start := time.Now()
 	err := handler(srv, ss)
-	duration := time.Since(start).Milliseconds()
 
 	switch info.FullMethod {
 	case "/broker.Broker/Subscribe":
 		activeSubscribers.Dec()
 	}
-
-	statusLabel := "successful"
-	errorLabel := ""
-	if err != nil {
-		statusLabel = "failed"
-		errorLabel = status.Convert(err).String()
-	}
-
-	methodCalls.With(prometheus.Labels{
-		"method": info.FullMethod,
-		"status": statusLabel,
-		"error":  errorLabel,
-	}).Observe(float64(duration))
 
 	return err
 }

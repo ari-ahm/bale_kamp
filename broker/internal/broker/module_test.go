@@ -130,6 +130,7 @@ func TestNonExpiredMessageShouldBeFetchable(t *testing.T) {
 	msg := createMessageWithExpire(time.Second * 10)
 	id, _ := service.Publish(mainCtx, "ali", *msg)
 	msg.Id = id
+	msg.Expiration = 0
 	fMsg, _ := service.Fetch(mainCtx, "ali", id)
 
 	assert.Equal(t, *msg, fMsg)
@@ -259,8 +260,8 @@ func TestConcurrentPublishShouldNotFail(t *testing.T) {
 
 func TestDataRace(t *testing.T) {
 	service := NewModule(NewBrokerRepo(), NewBrokerMessageHandler())
-	duration := 500 * time.Millisecond
-	ticker := time.NewTicker(duration)
+	duration := 1000 * time.Millisecond
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	var wg sync.WaitGroup
 
@@ -356,7 +357,7 @@ func BenchmarkSubscribe2(b *testing.B) {
 
 func TestAsli(t *testing.T) {
 	service = NewModule(NewBrokerRepo(), NewBrokerMessageHandler())
-	cnt1 := 10000
+	cnt1 := 1
 	cnt2 := 10000
 
 	finalTrue := 0

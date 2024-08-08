@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"therealbroker/api/proto"
 	"therealbroker/internal/broker"
+	"time"
 )
 
 // Main requirements:
@@ -17,6 +18,7 @@ import (
 // 	  for every base functionality ( publish, subscribe etc. )
 
 func main() {
+	time.Sleep(1 * time.Minute)             // TODO fix the healthcheck for postgres
 	lis, err := net.Listen("tcp", ":50051") // TODO read from env
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -27,9 +29,6 @@ func main() {
 	)
 
 	proto.RegisterBrokerServer(grpcServer, broker.NewBrokerServer())
-
-	// TODO ask
-	//broker.InitMetrics()
 
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
