@@ -17,7 +17,7 @@ var (
 	methodCalls = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "broker_method_calls",
 		Help:    "Method call duration and status",
-		Buckets: []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096},
+		Buckets: []float64{100, 200, 300, 400, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000},
 	}, []string{"method", "status", "error"})
 )
 

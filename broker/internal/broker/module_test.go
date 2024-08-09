@@ -21,6 +21,7 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().Unix())
 	service = NewModule(NewBrokerRepo(), NewBrokerMessageHandler())
 	m.Run()
+
 }
 
 func TestPublishShouldFailOnClosed(t *testing.T) {

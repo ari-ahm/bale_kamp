@@ -6,9 +6,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"therealbroker/api/proto"
 	"therealbroker/internal/broker"
-	"time"
 )
 
 // Main requirements:
@@ -18,8 +18,7 @@ import (
 // 	  for every base functionality ( publish, subscribe etc. )
 
 func main() {
-	time.Sleep(1 * time.Minute)             // TODO fix the healthcheck for postgres
-	lis, err := net.Listen("tcp", ":50051") // TODO read from env
+	lis, err := net.Listen("tcp", ":"+os.Getenv("GRPC_PORT"))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -32,7 +31,7 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
-		log.Fatal(http.ListenAndServe(":8080", nil))
+		log.Fatal(http.ListenAndServe(":"+os.Getenv("METRIC_PORT"), nil))
 	}()
 
 	if err := grpcServer.Serve(lis); err != nil {

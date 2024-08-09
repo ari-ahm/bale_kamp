@@ -6,16 +6,29 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"log"
+	"os"
 	"sync"
 	"therealbroker/pkg/broker"
 	"time"
 )
 
+var (
+	databaseUrl                  = os.Getenv("DATABASE_URL")
+	databaseBatchRequestInterval = func() time.Duration {
+		ret, err := time.ParseDuration(os.Getenv("DATABASE_BATCH_REQUEST_INTERVAL"))
+		if err != nil {
+			panic(err)
+		}
+		return ret
+	}()
+)
+
 type brokerRepo struct {
 	dbConn    *pgxpool.Pool
 	batches   [2]*pgx.Batch
-	batchSwap sync.WaitGroup
-	lock      sync.Mutex // TODO change
+	batchLock sync.Mutex
+	ctx       context.Context
+	close     context.CancelFunc
 }
 
 type BrokerRepo interface {
@@ -25,42 +38,46 @@ type BrokerRepo interface {
 }
 
 func NewBrokerRepo() BrokerRepo {
-	conn, err := pgxpool.New(context.Background(), "postgres://root:root@db:5432/broker?sslmode=disable") // TODO read from env.
+	conn, err := pgxpool.New(context.Background(), databaseUrl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	mh := &brokerRepo{
 		dbConn:  conn,
 		batches: [2]*pgx.Batch{{}, {}},
+		ctx:     ctx,
+		close:   cancel,
 	}
 
-	batchLock := sync.Mutex{}
 	commit := func() error {
-		did := batchLock.TryLock()
-		if did {
-			defer batchLock.Unlock()
+		mh.batchLock.Lock()
+		defer mh.batchLock.Unlock()
 
-			mh.lock.Lock()
-			mh.batches[0] = mh.batches[1]
-			mh.batches[1] = &pgx.Batch{}
-			mh.lock.Unlock()
+		mh.batches[0] = mh.batches[1]
+		mh.batches[1] = &pgx.Batch{}
 
-			br := conn.SendBatch(context.Background(), mh.batches[0]) // TODO fix context
-			err = br.Close()
-			if err != nil {
-				return err
-			}
+		br := conn.SendBatch(context.Background(), mh.batches[0]) // TODO fix context(ask)
+		err = br.Close()
+		if err != nil {
+			return err
 		}
 		return nil
 	}
 
-	ticker := time.Tick(50 * time.Millisecond) // TODO env
+	ticker := time.Tick(databaseBatchRequestInterval)
 	go func() {
-		for range ticker {
-			err := commit()
-			if err != nil {
-				log.Println(err)
+		for {
+			select {
+			case <-ticker:
+				err := commit()
+				if err != nil {
+					log.Println(err)
+				}
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -113,18 +130,22 @@ func (r *brokerRepo) load(ctx context.Context, id int, subject string) (*broker.
 
 func (r *brokerRepo) Close() error {
 	r.dbConn.Close()
+	r.close()
 	return nil
 }
 
 func (r *brokerRepo) runQuery(ctx context.Context, fn func(pgx.Row, chan<- bool) error, query string, args ...any) error {
 	finish := make(chan bool, 1)
 
-	r.lock.Lock()
-	row := r.batches[1].Queue(query, args...)
+	var row *pgx.QueuedQuery
+	func() {
+		r.batchLock.Lock()
+		defer r.batchLock.Unlock() // TODO ask for a better impl for this.(i want to use defer so i had to wrap it in a func(in case it paniced))
+		row = r.batches[1].Queue(query, args...)
+	}()
 	row.QueryRow(func(row pgx.Row) error {
 		return fn(row, finish)
 	})
-	r.lock.Unlock()
 
 	select {
 	case <-finish:

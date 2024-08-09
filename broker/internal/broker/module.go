@@ -5,31 +5,36 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"sync"
-	"sync/atomic"
 	"therealbroker/pkg/broker"
 	"time"
 )
 
 var (
-	chartMetric1 = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "broker_chart1",
+	dbLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "broker_db_latency",
+		Buckets: []float64{100, 200, 300, 400, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000},
 	})
-	chartMetric2 = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "broker_chart2",
+	deliverLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "broker_deliver_latency",
+		Buckets: []float64{100, 200, 300, 400, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000},
 	})
 )
 
 type module struct {
-	closing        atomic.Bool
+	ctx            context.Context
+	close          context.CancelFunc
 	wg             sync.WaitGroup
 	repo           BrokerRepo
 	messageHandler BrokerMessageHandler
 }
 
 func NewModule(repo BrokerRepo, messageHandler BrokerMessageHandler) broker.Broker {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &module{
 		repo:           repo,
 		messageHandler: messageHandler,
+		ctx:            ctx,
+		close:          cancel,
 	}
 }
 
@@ -38,23 +43,21 @@ func preChecks(m *module) error {
 		return broker.ErrNilPointer
 	}
 
-	if m.closing.Load() {
+	select {
+	case <-m.ctx.Done():
 		return broker.ErrUnavailable
+	default:
 	}
 
 	return nil
 }
 
-func (m *module) Close() error { // TODO clean
+func (m *module) Close() error {
 	if err := preChecks(m); err != nil {
 		return err
 	}
 
-	oldClosing := m.closing.Swap(true)
-	if oldClosing {
-		return broker.ErrUnavailable
-	}
-
+	m.close()
 	m.wg.Wait()
 
 	if err := m.messageHandler.Close(); err != nil {
@@ -77,17 +80,18 @@ func (m *module) Publish(ctx context.Context, subject string, msg broker.Message
 	}
 
 	tm := time.Now()
+	err := m.messageHandler.sendMessage(ctx, &msg, subject)
+	if err != nil {
+		return 0, err
+	}
+	deliverLatency.Observe(float64(time.Since(tm).Milliseconds()))
+
+	tm = time.Now()
 	id, err := m.repo.save(ctx, &msg, subject)
 	if err != nil {
 		return 0, err
 	}
-	chartMetric1.Observe(float64(time.Since(tm).Milliseconds()))
-
-	tm = time.Now()
-	if err := m.messageHandler.sendMessage(ctx, &msg, subject); err != nil {
-		return 0, err
-	}
-	chartMetric2.Observe(float64(time.Since(tm).Milliseconds()))
+	dbLatency.Observe(float64(time.Since(tm).Milliseconds()))
 
 	return id, nil
 }

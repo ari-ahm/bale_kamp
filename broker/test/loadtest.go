@@ -105,7 +105,7 @@ func main() {
 	for i := 0; i < subCnt; i++ {
 		wg.Add(1)
 		go func() {
-			ch, _ := bud.Subscribe(ctx, "ali")
+			ch, _ := bud.Subscribe(ctx, "randomString(3)")
 			wg.Done()
 			cnt := 0
 			for i := range ch {
@@ -128,32 +128,26 @@ func main() {
 		default:
 		}
 	}
+	wg.Wait()
 	diff := time.Since(tm)
 	log.Println("made", actSubCnt, "subscribers in", diff.Milliseconds(), "ms")
 	log.Println(int(diff.Nanoseconds())/(actSubCnt+1), "ns/op")
 
-	actPubCnt := 0
-	tm = time.Now()
-	for i := 0; i < pubCnt; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			bud.Publish(ctx, "ali", broker.Message{Body: randomString(20), Expiration: 1 * time.Second})
-		}()
-		actPubCnt++
+	time.Sleep(5 * time.Second)
+	ticker := time.Tick(1 * time.Second)
+
+	for {
 		select {
 		case <-ctx.Done():
 			break
-		default:
+		case <-ticker:
+			for i := 0; i < pubCnt; i++ {
+				go func() {
+					bud.Publish(ctx, "randomString(3)", broker.Message{Body: randomString(20), Expiration: 1 * time.Second})
+				}()
+			}
 		}
 	}
-	wg.Wait()
-	diff = time.Since(tm)
-	log.Println("made", actPubCnt, "publishes in", diff.Milliseconds(), "ms")
-	log.Println(int(diff.Nanoseconds())/(actPubCnt+1), "ns/op")
-	time.Sleep(30 * time.Second)
-	log.Println(subFinishCnt, "subscribers got all the messages")
-	log.Println(jafar)
 }
 
 func randomString(n int) string {

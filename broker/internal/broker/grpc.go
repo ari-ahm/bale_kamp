@@ -4,9 +4,20 @@ import (
 	"context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"os"
 	"therealbroker/api/proto"
 	"therealbroker/pkg/broker"
 	"time"
+)
+
+var (
+	contextTimeout = func() time.Duration {
+		ret, err := time.ParseDuration(os.Getenv("CONTEXT_TIMEOUT_CAP"))
+		if err != nil {
+			panic(err)
+		}
+		return ret
+	}()
 )
 
 type brokerServerImpl struct {
@@ -19,9 +30,8 @@ func NewBrokerServer() proto.BrokerServer {
 }
 
 func (b *brokerServerImpl) Publish(ctx context.Context, request *proto.PublishRequest) (*proto.PublishResponse, error) {
-	pubCtx, pubCtxCancel := context.WithTimeout(ctx, 10*time.Second) // TODO: fix and use env variable for timeout, see when to use cancel
+	pubCtx, _ := context.WithTimeout(ctx, contextTimeout)
 	id, err := b.module.Publish(pubCtx, request.GetSubject(), newMessage(request))
-	pubCtxCancel()
 	if err != nil {
 		return nil, errTranslate(err)
 	}
@@ -56,7 +66,8 @@ func (b *brokerServerImpl) Subscribe(request *proto.SubscribeRequest, server pro
 }
 
 func (b *brokerServerImpl) Fetch(ctx context.Context, request *proto.FetchRequest) (*proto.MessageResponse, error) {
-	msg, err := b.module.Fetch(context.WithoutCancel(ctx), request.GetSubject(), int(request.GetId()))
+	fetchCtx, _ := context.WithTimeout(ctx, contextTimeout)
+	msg, err := b.module.Fetch(fetchCtx, request.GetSubject(), int(request.GetId()))
 	if err != nil {
 		return nil, errTranslate(err)
 	}

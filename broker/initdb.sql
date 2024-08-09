@@ -4,4 +4,3 @@ CREATE TABLE IF NOT EXISTS messages(
     subject TEXT NOT NULL,
     expiration TIMESTAMP NOT NULL
 );
-

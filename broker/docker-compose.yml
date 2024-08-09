@@ -22,6 +22,8 @@ services:
       - db
     ports:
       - 50051:50051
+    env_file:
+      - config.env
   prometheus:
     image: prom/prometheus
     volumes:
