@@ -4,6 +4,8 @@ import (
 	"context"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"io"
 	"log"
 	"os"
@@ -21,14 +23,19 @@ var (
 		}
 		return ret
 	}()
+	databaseRequestLatencyMetric = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "broker_database_request_latency",
+		Buckets: []float64{10, 20, 35, 50, 75, 100, 200, 300, 400, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000},
+	})
 )
 
 type brokerRepo struct {
-	dbConn    *pgxpool.Pool
-	batches   [2]*pgx.Batch
-	batchLock sync.Mutex
-	ctx       context.Context
-	close     context.CancelFunc
+	dbConn       *pgxpool.Pool
+	batch        *pgx.Batch
+	batchLock    sync.RWMutex
+	pubBatchLock sync.Mutex
+	ctx          context.Context
+	close        context.CancelFunc
 }
 
 type BrokerRepo interface {
@@ -46,20 +53,19 @@ func NewBrokerRepo() BrokerRepo {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	mh := &brokerRepo{
-		dbConn:  conn,
-		batches: [2]*pgx.Batch{{}, {}},
-		ctx:     ctx,
-		close:   cancel,
+		dbConn: conn,
+		batch:  &pgx.Batch{},
+		ctx:    ctx,
+		close:  cancel,
 	}
 
 	commit := func() error {
 		mh.batchLock.Lock()
-		defer mh.batchLock.Unlock()
+		batch := mh.batch
+		mh.batch = &pgx.Batch{}
+		mh.batchLock.Unlock()
 
-		mh.batches[0] = mh.batches[1]
-		mh.batches[1] = &pgx.Batch{}
-
-		br := conn.SendBatch(context.Background(), mh.batches[0]) // TODO fix context(ask)
+		br := conn.SendBatch(context.Background(), batch) // TODO fix context(ask)
 		err = br.Close()
 		if err != nil {
 			return err
@@ -72,10 +78,12 @@ func NewBrokerRepo() BrokerRepo {
 		for {
 			select {
 			case <-ticker:
+				tm := time.Now()
 				err := commit()
 				if err != nil {
 					log.Println(err)
 				}
+				databaseRequestLatencyMetric.Observe(float64(time.Since(tm).Milliseconds()))
 			case <-ctx.Done():
 				return
 			}
@@ -87,13 +95,9 @@ func NewBrokerRepo() BrokerRepo {
 
 func (r *brokerRepo) save(ctx context.Context, message *broker.Message, subject string) (int, error) {
 	var id int64
-	err := r.runQuery(ctx,
-		func(row pgx.Row, finish chan<- bool) error {
-			err := row.Scan(&id)
-			finish <- true
-			return err
-		},
-		"INSERT INTO messages (body, subject, expiration) VALUES ($1, $2, $3) RETURNING id", message.Body, subject, time.Now().UTC().Add(message.Expiration))
+	err := r.runQuery(ctx, func(row pgx.Row) error {
+		return row.Scan(&id)
+	}, "INSERT INTO messages (body, subject, expiration) VALUES ($1, $2, $3) RETURNING id", message.Body, subject, time.Now().UTC().Add(message.Expiration))
 	if err != nil {
 		return 0, err
 	}
@@ -105,10 +109,8 @@ func (r *brokerRepo) load(ctx context.Context, id int, subject string) (*broker.
 	var actSubject string
 	var expiration time.Time
 	err := r.runQuery(ctx,
-		func(row pgx.Row, finish chan<- bool) error {
-			row.Scan(&message.Body, &actSubject, &expiration)
-			finish <- true
-			return nil
+		func(row pgx.Row) error {
+			return row.Scan(&message.Body, &actSubject, &expiration)
 		}, "SELECT body, subject, expiration FROM messages WHERE id = $1 LIMIT 1", id)
 
 	if err != nil {
@@ -134,17 +136,21 @@ func (r *brokerRepo) Close() error {
 	return nil
 }
 
-func (r *brokerRepo) runQuery(ctx context.Context, fn func(pgx.Row, chan<- bool) error, query string, args ...any) error {
+func (r *brokerRepo) runQuery(ctx context.Context, fn func(pgx.Row) error, query string, args ...any) error {
 	finish := make(chan bool, 1)
 
 	var row *pgx.QueuedQuery
 	func() {
-		r.batchLock.Lock()
-		defer r.batchLock.Unlock() // TODO ask for a better impl for this.(i want to use defer so i had to wrap it in a func(in case it paniced))
-		row = r.batches[1].Queue(query, args...)
+		r.batchLock.RLock()
+		defer r.batchLock.RUnlock() // TODO ask for a better impl for this.(i want to use defer so i had to wrap it in a func(in case it paniced))
+		r.pubBatchLock.Lock()
+		defer r.pubBatchLock.Unlock()
+		row = r.batch.Queue(query, args...)
 	}()
 	row.QueryRow(func(row pgx.Row) error {
-		return fn(row, finish)
+		err := fn(row)
+		finish <- true
+		return err
 	})
 
 	select {
@@ -153,5 +159,14 @@ func (r *brokerRepo) runQuery(ctx context.Context, fn func(pgx.Row, chan<- bool)
 		return broker.ErrContextCanceled
 	}
 
+	return nil
+}
+
+func (r *brokerRepo) addQuery(ctx context.Context, query string, args ...any) error {
+	r.batchLock.RLock()
+	defer r.batchLock.RUnlock()
+	r.pubBatchLock.Lock()
+	defer r.pubBatchLock.Unlock()
+	r.batch.Queue(query, args...)
 	return nil
 }
