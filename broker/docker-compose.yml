@@ -1,17 +1,16 @@
 services:
   db:
-    image: postgres:13-alpine
-    healthcheck:
-      test: pg_isready -U root -d broker
-      interval: 10s
-      timeout: 3s
-      retries: 3
+    image: scylladb/scylla:latest
     environment:
-      POSTGRES_USER: root # TODO change
-      POSTGRES_PASSWORD: root
       POSTGRES_DB: broker
+    healthcheck:
+      test: [ "CMD", "cqlsh", "-e 'DESCRIBE broker;'" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+#    command: ["/bin/sh", "-c", "sleep 30 && echo initializing db && cqlsh -f /docker-entrypoint-initdb.d/initdb.cql"] # TODO fix
     volumes:
-      - ./initdb.sql:/docker-entrypoint-initdb.d/initdb.sql
+      - ./initdb.cql:/docker-entrypoint-initdb.d/initdb.cql
   broker:
     image: message_broker:v1
     build:

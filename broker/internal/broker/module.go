@@ -71,25 +71,25 @@ func (m *module) Close() error {
 	return nil
 }
 
-func (m *module) Publish(ctx context.Context, subject string, msg broker.Message) (int, error) {
+func (m *module) Publish(ctx context.Context, subject string, msg broker.Message) (string, error) {
 	m.wg.Add(1)
 	defer m.wg.Done()
 
 	if err := preChecks(m); err != nil {
-		return 0, err
+		return "", err
 	}
 
 	tm := time.Now()
 	err := m.messageHandler.sendMessage(ctx, &msg, subject)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	deliverLatency.Observe(float64(time.Since(tm).Milliseconds()))
 
 	tm = time.Now()
 	id, err := m.repo.save(ctx, &msg, subject)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	dbLatency.Observe(float64(time.Since(tm).Milliseconds()))
 
@@ -112,7 +112,7 @@ func (m *module) Subscribe(ctx context.Context, subject string) (<-chan *broker.
 	return msg, nil
 }
 
-func (m *module) Fetch(ctx context.Context, subject string, id int) (broker.Message, error) {
+func (m *module) Fetch(ctx context.Context, subject string, id string) (broker.Message, error) {
 	m.wg.Add(1)
 	defer m.wg.Done()
 

@@ -19,7 +19,7 @@ import (
 // 	  for every base functionality ( publish, subscribe etc. )
 
 func main() {
-	time.Sleep(30 * time.Second)
+	time.Sleep(40 * time.Second)
 	lis, err := net.Listen("tcp", ":"+os.Getenv("GRPC_PORT"))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)

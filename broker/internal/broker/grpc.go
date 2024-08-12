@@ -36,7 +36,7 @@ func (b *brokerServerImpl) Publish(ctx context.Context, request *proto.PublishRe
 		return nil, errTranslate(err)
 	}
 
-	return &proto.PublishResponse{Id: int32(id)}, nil
+	return &proto.PublishResponse{Id: id}, nil
 }
 
 func (b *brokerServerImpl) Subscribe(request *proto.SubscribeRequest, server proto.Broker_SubscribeServer) error {
@@ -67,7 +67,7 @@ func (b *brokerServerImpl) Subscribe(request *proto.SubscribeRequest, server pro
 
 func (b *brokerServerImpl) Fetch(ctx context.Context, request *proto.FetchRequest) (*proto.MessageResponse, error) {
 	fetchCtx, _ := context.WithTimeout(ctx, contextTimeout)
-	msg, err := b.module.Fetch(fetchCtx, request.GetSubject(), int(request.GetId()))
+	msg, err := b.module.Fetch(fetchCtx, request.GetSubject(), request.GetId())
 	if err != nil {
 		return nil, errTranslate(err)
 	}

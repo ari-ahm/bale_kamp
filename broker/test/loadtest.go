@@ -23,14 +23,14 @@ func (b brokerSpy) Close() error {
 	return nil
 }
 
-func (b brokerSpy) Publish(ctx context.Context, subject string, msg broker.Message) (int, error) {
+func (b brokerSpy) Publish(ctx context.Context, subject string, msg broker.Message) (string, error) {
 	res, err := b.client.Publish(context.WithoutCancel(ctx), &proto.PublishRequest{
 		Subject:           subject,
 		Body:              []byte(msg.Body),
 		ExpirationSeconds: int32((msg.Expiration + time.Second - 1) / time.Second),
 	})
 
-	return int(res.GetId()), err
+	return res.GetId(), err
 }
 
 func (b brokerSpy) Subscribe(ctx context.Context, subject string) (<-chan *broker.Message, error) {
@@ -61,10 +61,10 @@ func (b brokerSpy) Subscribe(ctx context.Context, subject string) (<-chan *broke
 	return ch, err
 }
 
-func (b brokerSpy) Fetch(ctx context.Context, subject string, id int) (broker.Message, error) {
+func (b brokerSpy) Fetch(ctx context.Context, subject string, id string) (broker.Message, error) {
 	res, err := b.client.Fetch(context.WithoutCancel(ctx), &proto.FetchRequest{
 		Subject: subject,
-		Id:      int32(id),
+		Id:      id,
 	})
 
 	return broker.Message{
@@ -143,7 +143,8 @@ func main() {
 		case <-ticker:
 			for i := 0; i < pubCnt; i++ {
 				go func() {
-					bud.Publish(ctx, "randomString(3)", broker.Message{Body: randomString(20), Expiration: 1 * time.Second})
+					c2tx, _ := context.WithTimeout(ctx, 1*time.Second)
+					bud.Publish(c2tx, "randomString(3)", broker.Message{Body: randomString(20), Expiration: 100 * time.Second})
 				}()
 			}
 		}
